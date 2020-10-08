@@ -1,6 +1,7 @@
 # PID control project
 Self-Driving Car Engineer Nanodegree Program
 
+Here is [the video](https://www.youtube.com/watch?v=HFP3HjZUyZI) of the project.
 ---
 
 ## Goal
