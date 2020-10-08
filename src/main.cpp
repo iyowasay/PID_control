@@ -2,8 +2,10 @@
 #include <uWS/uWS.h>
 #include <iostream>
 #include <string>
+#include <vector>
 #include "json.hpp"
 #include "PID.h"
+
 
 // for convenience
 using nlohmann::json;
@@ -30,15 +32,49 @@ string hasData(string s) {
   return "";
 }
 
-int main() {
+
+void reset_simulator(uWS::WebSocket<uWS::SERVER> ws) {
+  std::string msg = "42[\"reset\",{}]";
+  ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
+}
+
+void print_vector(const std::vector<double>& vec, const string type)
+{
+  std::cout << std::endl;
+  std::cout << type << "   dp:" << std::endl;
+  for(auto x: vec)
+  {
+    std::cout << x << std::endl;
+  }
+  return;
+}
+
+int main(int argc, char* argv[]) {
   uWS::Hub h;
 
-  PID pid;
-  /**
-   * TODO: Initialize the pid variable.
-   */
+  PID pid_steer;
+  PID pid_speed;
+  
+  bool twiddling = false;
+  
+  // Initialization
+  if(twiddling==true)
+  {
+    double Kp0 = 0.1; // atof(argv[1]) 
+    double Ki0 = 0.0001;  // atof(argv[2]) 
+    double Kd0 = 2;  // atof(argv[3]) 
+    pid_steer.Init(Kp0, Ki0, Kd0);
+    pid_speed.Init(0.1, 0.001, 0.5);
+  }
+  else
+  {
+    pid_steer.Init(0.2, 0.00007, 5);
+    pid_speed.Init(0.8, 0.00007, 2);
+  }
+  
+  std::cout << "Initialized!" << std::endl;
 
-  h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, 
+  h.onMessage([&twiddling, &pid_steer, &pid_speed](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, 
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -55,24 +91,44 @@ int main() {
           // j[1] is the data JSON object
           double cte = std::stod(j[1]["cte"].get<string>());
           double speed = std::stod(j[1]["speed"].get<string>());
-          double angle = std::stod(j[1]["steering_angle"].get<string>());
+          //double angle = std::stod(j[1]["steering_angle"].get<string>());
+          // std::cout << angle << std::endl;
           double steer_value;
-          /**
-           * TODO: Calculate steering value here, remember the steering value is
-           *   [-1, 1].
-           * NOTE: Feel free to play around with the throttle and speed.
-           *   Maybe use another PID controller to control the speed!
-           */
+          double throttle_value;
+
+          pid_steer.UpdateError(cte);
+          steer_value = pid_steer.Control_output();
+
+          double target_speed = 55.0;
+          double adjusting = 30 * (1.0-2.5*fabs(steer_value)) + target_speed;
+          double speed_err = speed - adjusting;
+          pid_speed.UpdateError(speed_err);
+          throttle_value = pid_speed.Control_output();
           
+          if(twiddling==true)
+          {
+            const int step_threshold = 100;
+            const double tolerance = 0.001;
+            if(pid_steer.iter > step_threshold)
+            {
+              pid_steer.Twiddle(tolerance);
+              print_vector(pid_steer.dp, "steer");
+            }
+
+            if(pid_speed.iter > step_threshold)
+            {
+              pid_speed.Twiddle(tolerance);
+              print_vector(pid_speed.dp, "speed");
+            }
+          }
           // DEBUG
-          std::cout << "CTE: " << cte << " Steering Value: " << steer_value 
-                    << std::endl;
+          // std::cout << "CTE: " << cte << " Steering Value: " << steer_value << " Speed: " << speed << std::endl;
 
           json msgJson;
           msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = 0.3;
+          msgJson["throttle"] = throttle_value;
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          //std::cout << msg << std::endl;
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }  // end "telemetry" if
       } else {
@@ -83,11 +139,11 @@ int main() {
     }  // end websocket message if
   }); // end h.onMessage
 
-  h.onConnection([&h](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
+  h.onConnection([](uWS::WebSocket<uWS::SERVER> ws, uWS::HttpRequest req) {
     std::cout << "Connected!!!" << std::endl;
   });
 
-  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code, 
+  h.onDisconnection([](uWS::WebSocket<uWS::SERVER> ws, int code, 
                          char *message, size_t length) {
     ws.close();
     std::cout << "Disconnected" << std::endl;
